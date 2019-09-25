@@ -1,0 +1,343 @@
+
+
+///////////////////////////////
+///				///
+///	End of User Input	///
+///				///
+///////////////////////////////
+
+
+
+
+// Distance estimation for the scene
+float DE(vec3 p, vec3 c)
+{
+    float sphere = dSphere(p, c, 8.0);
+    float function = sdfFunction(p,c);
+    float d = max(sphere, function);
+    
+    return d;
+}
+
+
+// Distance estimation of the above function between two bounding points, which must be
+// adjacent points of the following categories: Extrema, Inflecta, vertical asymptotes.
+// 
+// This is where the magic happens so to speak. It uses a combination of various tangent
+// lines and chords depending on what side of the function we're on, the concavity and slope
+// within the bounds given, and whether we are inside those bounds in the first place.
+float sdfOfBound(vec3 Point, vec3 Center, vec2 Keys)
+{
+	vec3 pnt = Point - Center;
+    float h = pnt.z;
+    float k = pnt.y;
+    float a = Keys.x;
+    float b = Keys.y;
+	float range = (b-a);
+    float half_range = range * 0.5;
+    float clamped_h = clamp(h, a, b);
+    vec2 A = vec2(h, k);
+    vec2 Bp = vec2(clamped_h, k);
+    vec2 Bf = vec2(clamped_h, f(clamped_h));
+    float concavity = sgn( ddf( a + half_range ) );
+	float derivative = sgn( df(a + half_range) );    
+    bool clamped = (h < a || h > b);
+    if (clamped)
+    {
+     	bool ctangent_method = (sgn(Bp.y - Bf.y)) != sgn( ddf( a + half_range ) );
+        float ct_slope = df(Bp.x);
+    	vec2 ct_pnt = Bf;
+    	vec2 ct_closest = intersectionOfTwoLines(ct_pnt, ct_slope, A, -1.0 / ct_slope);
+        float ct_dist = distance(ct_closest, A);
+        if (ct_closest.x < a || ct_closest.x > b)
+        {
+        	ct_dist = max(max(ct_dist, A.x - b), a - A.x);
+        }       
+        if (ctangent_method)
+        {
+         	return ct_dist;   
+        }
+		float cch_samp_d = distance(A, Bf)* -sgn(A.x - Bp.x);
+	    float cch_raw_Q = A.x + cch_samp_d;       
+	    float cch_clamped_Q = clamp(cch_raw_Q, a, b);   
+        vec2 cch_P = Bf;
+	    vec2 cch_Q = vec2(cch_clamped_Q, f(cch_clamped_Q));
+        float cch_slope = (cch_P.y - cch_Q.y) / (cch_P.x - cch_Q.x);
+    	vec2 cch_pnt = cch_P;
+	    vec2 cch_closest = intersectionOfTwoLines(cch_pnt, cch_slope, A, -1.0 / cch_slope);
+        if ( cch_closest.x < a || cch_closest.x > b)
+        {
+        	cch_closest = vec2(clamp(cch_closest.x, a, b), f(clamp(cch_closest.x, a, b))); 
+        }
+        float cch_dist = distance(cch_closest, A);
+        return cch_dist;      
+    }
+    bool tangent_method = (sgn(A.y - f(A.x)) != concavity);    
+    float t_slope = df(A.x);
+    vec2 t_pnt = vec2(A.x, f(A.x));
+    vec2 t_closest = intersectionOfTwoLines(t_pnt, t_slope, A, -1.0 / t_slope);
+    float t_dist = distance(t_closest, A);
+    float ch_samp_d = abs(f(A.x) - k) * sgn(df(A.x)) * sgn(ddf(a + half_range));   
+    float ch_raw_Q = A.x + ch_samp_d;       
+    float ch_clamped_Q = clamp(ch_raw_Q, a, b);   
+    vec2 ch_P = vec2(A.x, f(A.x));
+    vec2 ch_Q = vec2(ch_clamped_Q, f(ch_clamped_Q));
+    float ch_slope = (ch_P.y - ch_Q.y) / (ch_P.x - ch_Q.x);
+    vec2 ch_pnt = ch_P;
+    vec2 ch_closest = intersectionOfTwoLines(ch_pnt, ch_slope, A, -1.0 / ch_slope);
+    float ch_dist = distance(ch_closest, A);
+    if (tangent_method)
+    {
+     	return t_dist;   
+    }    
+    return ch_dist;
+}
+
+// A method for intersecting two lines in R-two.
+vec2 intersectionOfTwoLines(vec2 A, float sa, vec2 B, float sb)
+{
+	float buffer = (sa*A.x - A.y - sb * B.x + B.y) / (sa - sb);
+	vec2 intersection = float2(buffer, sa*(buffer - A.x) + A.y);
+	return intersection;
+}
+
+// evaluate the height of a line at some point x
+float LineHeight(float slope, vec2 point, float x)
+{
+ 	return slope*(x - point.x) + point.y;   
+}
+
+// Exact intersection of a sphere. Resolves a quatratic equation. Returns the 
+// min distance, max distance, and discriminant to determine if the intersections
+// actually exist.
+vec3 intersections_of_sphere(vec3 pos_vector, vec3 dir_vector, float sphere_radius)
+{
+	// Derivation for formula:
+	//		Let the ray be represented as a point P plus a scalar multiple t of the direction vector v,
+	//		The ray can then be expressed as P + vt
+	//
+	//		The point of intersection I = (x, y, z) must be expressed as this, but must also be some distance r
+	//		from the center of the sphere, thus x*x + y*y + z*z = r*r, or in vector notation, I*I = r*r
+	//
+	//		It therefore follows that (P + vt)*(P + vt) = r*r, or when expanded and rearranged,
+	//		(v*v)t^2 + (2P*v)t + (P*P - r*r) = 0. For this we will use the quadratic equation for the points of
+	//		intersection
+
+	// a, b, and c correspond to the second, first, and zeroth order terms of t, the parameter we are trying to solve for.
+	float a = dot(dir_vector, dir_vector);
+	float b = 2.0 * dot(pos_vector, dir_vector);
+	float c = dot(pos_vector, pos_vector) - sphere_radius * sphere_radius;
+
+	// to avoid imaginary number, we will find the absolute value of the discriminant.
+	float discriminant = b * b - 4.0 * a*c;
+	float abs_discriminant = abs(discriminant);
+	float min_dist = (-b - sqrt(abs_discriminant)) / (2.0 * a);
+	float max_dist = (-b + sqrt(abs_discriminant)) / (2.0 * a);
+
+    // return the two intersections, along with the discriminant to determine if
+    // the intersections actually exist.
+	return float3(min_dist, max_dist, discriminant);
+
+}
+
+// Exact SDF for a sphere
+float dSphere(vec3 pos, vec3 center, float radius)
+{
+    vec3 v = pos - center;
+    return length(v) - radius;
+}
+
+// Convert degrees to radians
+float Radians(float deg)
+{
+ 	return deg / 360.0 * 2.0 * 3.14159; 
+}
+
+
+// return the sign of the value input (favoring positive)
+float sgn(float x)
+{
+ 	if (x < 0.0)
+    {
+    	return -1.0;
+    }
+    return 1.0;
+}
+
+// Write a float4 function for some of the HLSL Code conversion
+vec4 float4(float x, float y, float z, float w)
+{
+ 	return vec4(x,y,z,w);   
+}
+
+// Write a float3 function for the same purpose
+vec3 float3(float x, float y, float z)
+{
+ 	return vec3(x,y,z);   
+}
+
+// and a float2 function as well
+vec2 float2(float x, float y)
+{
+ 	return vec2(x, y);   
+}
+
+// Draw the main image
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+    // Define the iterations for the marcher.
+    const int ITERATIONS = 60;
+    
+    // Define the roation speed. Set to 0 to disable
+    const float ROTATION_SPEED = 0.6;
+    
+    // Define the start angle for the rotation (in degrees)
+    const float START_ANGLE = 0.0;
+    
+    // Define the orbit radius
+    const float ORBIT_RADIUS = 16.0;
+    
+    // Define the epsilon value for closeness to be considered a hit
+    const float EPSILON = 0.001;
+    
+    const bool HIDE_BACKGROUND = false;
+    
+    
+    
+    // Define the center of the julia set
+    vec3 sdf_center = vec3(0.0, 0.0, 0.0);
+ 
+    // Calculate the starting angles for the orbit
+    float theta = iTime * ROTATION_SPEED;
+    float phi = Radians(START_ANGLE);
+    
+    // Take some mouse input
+    vec4 mouse = iMouse / iResolution.xyxx;
+    
+    // If the mouse is being held down
+    if (mouse.z > 0.0)
+    {
+        // convert the mouse input to angles
+        theta = mouse.x * 2.0 * 3.14159;
+        phi = (mouse.y - 0.5) * 1.0 * 3.14159;
+    }
+    
+    // Define an orbital path based on time
+    vec3 orbit = vec3(cos(theta)*cos(phi), sin(phi), sin(theta)*cos(phi));
+    
+    // Cacluate the normal of the path. Since its a circle, it will just
+    // be back down into the center
+    vec3 normal = -normalize(orbit);
+    
+    // Calculate the tangent of the path
+    // A circle consists of <cost, sint>, which when differentiated yields
+    // <-sint, cost>. since z is already sint, and x is already cost, the equation
+    // is as follows.
+    vec3 tangent = normalize(vec3(-normal.z, 0.0, normal.x));
+    
+	// Calculate the UV coordinates
+    vec2 uv = fragCoord/iResolution.xy;
+    
+    // Convert the UV coordinates to a range between -1 and 1
+    vec2 range = uv*2.0 - vec2(1.0,1.0);
+    
+    //// Define the Camera position
+    //vec3 cam_pos = vec3(0,0,-2);
+    
+    //// Define the forward, up, and right vectors (needs rework)
+    //vec3 forward = normalize(vec3(0,0,1));
+    //vec3 up = normalize(vec3(0,1,0));
+    //vec3 right = normalize(vec3(1,0,0));
+    
+    // Define the Camera position
+    vec3 cam_pos = orbit*ORBIT_RADIUS;
+    
+    // Define the forward, up, and right vectors (needs rework)
+    vec3 forward = normal;
+    vec3 up = normalize(cross(normal, tangent));
+    vec3 right = tangent;
+        
+    // Calculate the aspect ratio of the screen
+    float aspect = float(iResolution.y) / float(iResolution.x);
+    
+    // Calculate the ray as a normalized combination of the forward, right, and up vectors.
+    // Note that the purely forward + horizonal combination yield vectors 45 degrees outward
+    // for a 90 degree field of view. This may be updated with a fov option
+    vec3 ray = normalize(forward + range.x*right + range.y*up*aspect);
+    
+    // Initialize the ray marched point p
+    vec3 p = cam_pos;
+
+
+	// Initialize the distance
+    float dist = 1.0;
+    
+    // Calculate the exact distance from a sphere of radius 2 using a raytracing function
+    vec3 init_distance = intersections_of_sphere(p - sdf_center, ray, 8.0);
+    
+    // If we are outside a bubble around the raymarched fractal
+    if (init_distance.z > 0.0)
+    {
+        // Step onto the sphere so we start off a bit closer.
+    	p += ray * clamp(init_distance.x, 0.0, init_distance.x);
+    }
+
+    // declare a dummy variable to store the number of iterations into.
+    // I'm doing it this way because on my phone it didnt let me use an
+    // already declared variable as the loop iterator.
+    int j;
+    
+    float min_dist = 1.0;
+	// Begin the raymarch
+    for (int i = 0; i < ITERATIONS; i++)
+    {
+        // Estimate the distance to the julia set
+        dist = DE(p, sdf_center);
+        
+        min_dist = min(dist, min_dist);
+        
+        // Move forward that distance
+        p += ray*dist;
+        
+        // Record the number of iterations we are on
+        j = i;
+        
+        // If we hit the julia set, or get too far away form it
+        if (dist < EPSILON || dot(p - sdf_center, p-sdf_center) > 64.0 + 0.1)
+        {
+            // Break the loop.
+        	break;   
+        }
+        
+    }
+    
+        // determine if we hit the fractal or not
+    float hit = step(dist, EPSILON);
+    
+    
+    // calculate the brightness based on iterations used
+	float di = (1.0 - (float(j) + (dist / EPSILON)*hit) / float(ITERATIONS));
+    float glow = 1.0 - (min_dist / 1.0);
+    
+	//di = (di * hit) + (glow*(1.0-hit));
+    if (HIDE_BACKGROUND)
+    {
+    	di *= hit;
+    }
+
+    
+    
+    
+    // define some phase angle
+    float psi = Radians(70.0);
+    
+    // Time varying pixel color (included in default shadertoy project)
+    //vec3 col = 0.8 + 0.2*cos(iTime*0.5+uv.xyx+vec3(0,2,4) + psi*hit);
+	
+    // Boring old white instead of the above commented code. Will tweak rendering later
+    vec3 col = vec3(1.0,1.0,1.0);
+    
+    
+    // Output to screen. Modifiy the color with the brightness calculated as di.
+    fragColor = vec4(col*di,1.0);
+}

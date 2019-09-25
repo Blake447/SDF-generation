@@ -1,0 +1,115 @@
+// Return the roots of a cubic equation
+vec3 polynomial()
+{
+	// define the roots of the cubic in here. This is case-wise, and is only used
+    // for cubic equations without repeating roots, as the first two derivatives
+    // and their respective roots can easily be expressed in terms of these roots.
+    // This means users can easily input just the roots and the code will take care
+    // of the rest.
+    float r1 = -4.0;
+    float r2 = 0.0;
+    float r3 = 4.0;
+    return vec3(r1, r2, r3);
+}
+
+float f(float x)
+{
+    // given the roots of the cubic, calculate the function of x.
+    // Again, this is specific to this family of cubic equations. For general functions,
+    // this will just be output explicitly
+    vec3 roots = polynomial();    
+    float r1 = -roots.x;
+    float r2 = -roots.y;
+    float r3 = -roots.z;
+    
+ 	return 0.1*(x+r1)*(x+r2)*(x+r3);   
+}
+float df(float x)
+{
+    // given the roots of the cubic, calculate the derivative of x.
+    // Another specific case. Will be output explicitly later
+    vec3 roots = polynomial();
+    float r1 = -roots.x;
+    float r2 = -roots.y;
+    float r3 = -roots.z;
+    
+    float A = r1 + r2 + r3;
+    float B = r1*r2 + r2*r3 + r3*r1;
+    
+    
+ 	return 0.1*(3.0*x*x + 2.0*x*A + B);   
+}
+float ddf(float x)
+{
+    // given the roots of the cubic, calculate the concavity of x
+    // Specific case
+    vec3 roots = polynomial();
+    float r1 = -roots.x;
+    float r2 = -roots.y;
+    float r3 = -roots.z;
+    
+    float A = r1 + r2 + r3;
+    float B = r1*r2 + r2*r3 + r3*r1;
+    
+ 	return 0.1*(6.0*x + 2.0*A);   
+}
+
+// Fetch some boundary. Basically return two adjacent special points (more on this later).
+vec2 GetBoundary(int i)
+{
+    // using the roots of the polynomial, we will determine extrema and inflection points
+    vec3 roots = polynomial();
+    float r1 = -roots.x;
+    float r2 = -roots.y;
+    float r3 = -roots.z;
+    
+    // specific case
+    float A = r1 + r2 + r3;
+    float B = r1*r2 + r2*r3 + r3*r1;
+    
+    float sp0 = -1000.0;
+    float sp1 = -A/3.0 - sqrt(A*A - 3.0*B)/3.0;
+    float sp2 = -A/3.0;
+    float sp3 = -A/3.0 + sqrt(A*A - 3.0*B)/3.0;
+    float sp4 = 1000.0;
+        
+    
+    if (i == 0)
+    {
+        return vec2(sp0, sp1);
+    }
+    if (i == 1)
+    {
+        return vec2(sp1, sp2);
+    }
+    if (i == 2)
+    {
+        return vec2(sp2, sp3);
+    }
+    if (i == 3)
+    {
+        return vec2(sp3, sp4);
+    }
+
+    return vec2(0.0,0.0);
+}
+
+// An SDF consisting of iterating through several portions of some function, to eventually
+// build it all together.
+float sdfFunction(vec3 Point, vec3 Center)
+{
+    const int POINT_COUNT = 5;
+	float d = 100000.0;
+     
+    float x = Point.z - Center.z;
+       
+	for (int i = 0; i < POINT_COUNT - 1; i++)
+    {
+     	d = min(d, sdfOfBound(Point, Center, GetBoundary(i)));   
+    }
+    
+    return d;
+}
+
+
+

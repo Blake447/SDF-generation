@@ -1,0 +1,20 @@
+vec2 intersectionOfTwoLines(vec2 A, float sa, vec2 B, float sb);
+float sgn(float x);
+float LineHeight(float slope, vec2 point, float x);
+float Radians(float deg);
+vec4 float4(float x, float y, float z, float w);
+vec3 float3(float x, float y, float z);
+vec2 float2(float x, float y);
+vec3 intersections_of_sphere(vec3 pos_vector, vec3 dir_vector, float sphere_radius);
+float sdfOfBound(vec3 Point, vec3 Center, vec2 Keys);
+float sdfFunction(vec3 Point, vec3 Center);
+float DE(vec3 p, vec3 c);
+float dSphere(vec3 pos, vec3 center, float radius);
+
+// So the idea of this shader is to raymarch some function given some information about it.
+// The relevant information consists of 3 functions, along with some bounds.
+// The three functions below define the function we are going to raymarch. df is the first
+// derivative of f, and ddf is the second derivative of f. Along with that, some bounds need to
+// be defined as well, but we'll get to that.
+
+
